@@ -9,6 +9,8 @@ _index = None
 def get_index():
     global _index
     if _index is None:
+        if pinecone_client is None:
+            raise RuntimeError("PINECONE_API_KEY is missing or invalid in environment variables.")
         _index = pinecone_client.Index(settings.pinecone_index_name)
     return _index
 
