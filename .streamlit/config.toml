@@ -1,7 +1,16 @@
 [server]
 headless = true
 port = 8501
+enableCORS = false
 enableXsrfProtection = false
+maxUploadSize = 200
 
 [client]
 showErrorDetails = true
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
+
+[global]
+developmentMode = false
