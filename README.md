@@ -1,307 +1,249 @@
 # Agentic AI eBook RAG Chatbot
 
-A custom Python Retrieval-Augmented Generation chatbot built for the AI Engineer interview assignment.
+An end-to-end, cyclic Retrieval-Augmented Generation (RAG) system built with **LangGraph**, **Pinecone**, and **FastAPI** / **Streamlit**, strictly grounded in the [Agentic AI eBook](https://konverge.ai/pdf/Ebook-Agentic-AI.pdf).
 
-## Stack
+Developed for the **Appening AI Engineer Interview Task**.
 
-- Python 3.10+
-- PyPDF
-- LangChain RecursiveCharacterTextSplitter
-- OpenAI `text-embedding-3-small`
-- OpenAI `gpt-4o-mini`
-- Pinecone
-- LangGraph
-- FastAPI
+---
 
-## Architecture
+## 🌟 Key Highlights
+
+- **Cyclic LangGraph Orchestration**: Stateful graph with retrieval, answer synthesis, hallucination grading, and refusal safety gating.
+- **Strict Document Grounding**: Restricts generation strictly to retrieved eBook chunks with automatic refusal for out-of-scope queries (e.g., *"What is the capital of France?"*).
+- **100% Free Tier Compatible**: Supports free **Groq** (`qwen/qwen3.8-27b`) for sub-second LLM inference and **HuggingFace** (`sentence-transformers/all-MiniLM-L6-v2`) for local zero-cost dense embeddings. Also supports **OpenAI** (`gpt-4o-mini`, `text-embedding-3-small`).
+- **Standardized Output Payload**: Every response adheres strictly to the assignment JSON schema: `query`, `final_answer`, `retrieved_context_chunks`, and `confidence_score`.
+- **Dual Interfaces**: 
+  - Modern Dark-Mode Web UI built right into FastAPI at `http://localhost:8000/`.
+  - Streamlit dashboard at `streamlit_app.py`.
+- **Pre-verified Benchmark Suite**: `tests_sample_queries.py` runs all 6 required benchmark questions with latency and schema assertions.
+
+---
+
+## 🏗️ Architecture & Workflow
 
 ```text
-Agentic AI eBook
-      |
-      v
-  PDF download
-      |
-      v
-  PyPDF extraction
-      |
-      v
- RecursiveCharacterTextSplitter
-   1000 chars / 200 overlap
-      |
-      v
- OpenAI embeddings
- text-embedding-3-small
-      |
-      v
- Pinecone
- 1536 dimensions / cosine
-      |
-      | user question
-      v
- LangGraph
-      |
-      +--> retrieve
-      |
-      +--> generate
-      |
-      +--> groundedness grade
-      |
-      +--> final safety gate
-      |
-      v
- FastAPI /chat
+               +----------------------------------+
+               |  Agentic AI eBook (PDF Document) |
+               +----------------------------------+
+                                 |
+                                 v [PyPDF + RecursiveCharacterTextSplitter]
+               +----------------------------------+
+               |  Chunks (1000 chars, 200 ovlp)   |
+               +----------------------------------+
+                                 |
+                                 v [HuggingFace / OpenAI Embeddings]
+               +----------------------------------+
+               | Pinecone Vector DB (Index / NS)  |
+               +----------------------------------+
+                                 |
+           User Query ---------->|
+                                 v
+               +==================================+
+               |        LangGraph Workflow        |
+               |                                  |
+               |   [START]                        |
+               |      |                           |
+               |      v                           |
+               |  [Retrieve Node]                 |
+               |      | Top-k Semantic Search     |
+               |      v                           |
+               |  [Generate Node]                 |
+               |      | Strict Context Synthesis  |
+               |      v                           |
+               |  [Grade Node]                    |
+               |      | Groundedness Evaluation   |
+               |      v                           |
+               |  [Finalize / Safety Gate]        |
+               |      | Refusal if ungrounded     |
+               |      v                           |
+               |    [END]                         |
+               +==================================+
+                                 |
+                                 v
+               +----------------------------------+
+               |      FastAPI / Streamlit UI      |
+               |   (Standardized JSON Response)   |
+               +----------------------------------+
 ```
 
-## 1. Setup
+---
 
-Python 3.10+ is required.
+## 📁 Repository Structure
+
+```text
+agentic-ai-rag/
+├── app.py                      # FastAPI application with built-in Web UI & /chat endpoint
+├── streamlit_app.py            # Streamlit dashboard interface
+├── tests_sample_queries.py     # Verification suite for the 6 benchmark queries
+├── requirements.txt            # Python dependencies
+├── .env.example                # Template configuration file
+├── .gitignore                  # Git ignore rules (protects credentials & binaries)
+├── README.md                   # Project documentation & setup guide
+├── src/
+│   ├── __init__.py
+│   ├── config.py               # Pydantic Settings configuration loader
+│   ├── clients.py              # Managed API clients (Pinecone, Groq, OpenAI, HuggingFace)
+│   ├── models.py               # Pydantic & LangGraph state models
+│   ├── ingestion.py            # PDF loader, chunking & Pinecone upsert pipeline
+│   ├── retrieval.py            # Vector retrieval & index query logic
+│   └── graph.py                # LangGraph state machine & grading nodes
+└── data/
+    └── Ebook-Agentic-AI.pdf    # Source knowledge base PDF (downloaded)
+```
+
+---
+
+## 🚀 Quickstart Guide
+
+### 1. Prerequisites
+- Python 3.10 or higher
+- Pinecone API Key (free tier at [pinecone.io](https://www.pinecone.io/))
+- Groq API Key (free tier at [console.groq.com](https://console.groq.com/)) OR OpenAI API Key
+
+### 2. Environment Setup
+
+Clone repository and create virtual environment:
 
 ```bash
-python -m venv .venv
+git clone https://github.com/<your-username>/agentic-ai-rag.git
+cd agentic-ai-rag
+
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+# Windows:
+.\venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
 ```
 
-macOS/Linux:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows:
-
-```powershell
-.venv\Scripts\activate
-```
-
-Install:
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Create environment file:
+### 3. Configure Credentials
+
+Copy the environment template:
 
 ```bash
 cp .env.example .env
 ```
 
-Set:
+Configure your `.env` file:
 
 ```env
-OPENAI_API_KEY=...
-PINECONE_API_KEY=...
-```
-
-**Note:** OpenAI requires API credits. If you don't have credits, you can use the free Groq alternative (see below).
-
-## Free Alternative (Groq)
-
-If you don't have OpenAI credits, you can use Groq's free LLM service:
-
-1. Get a free Groq API key from https://console.groq.com/
-2. Install Groq: `pip install groq`
-3. Update your `.env` file:
-
-```env
-OPENAI_API_KEY=your_openai_api_key_here
-PINECONE_API_KEY=your_pinecone_api_key_here
-GROQ_API_KEY=your_groq_api_key_here
+# Free-tier default (Groq + HuggingFace)
 LLM_PROVIDER=groq
+GROQ_API_KEY=your_groq_api_key
+PINECONE_API_KEY=your_pinecone_api_key
+PINECONE_INDEX_NAME=agentic-ai-rag
+PINECONE_NAMESPACE=agentic-ai
+EMBEDDING_PROVIDER=huggingface
+
+# (Optional) If using OpenAI instead:
+# LLM_PROVIDER=openai
+# EMBEDDING_PROVIDER=openai
+# OPENAI_API_KEY=your_openai_api_key
 ```
 
-4. Test: `python test_groq.py`
+---
 
-This uses Groq for LLM calls (free) and OpenAI for embeddings (very cheap). See `FREE_ALTERNATIVE_SETUP.md` for details.
+## 📥 Ingestion & Vector Storage Pipeline
 
-## 2. Document ingestion
-
-The configured source is the Agentic AI eBook supplied in the interview reference.
-
-Run:
+To parse the PDF, generate dense vector embeddings, and index into Pinecone:
 
 ```bash
 python -m src.ingestion
 ```
 
-The ingestion pipeline:
+The ingestion pipeline performs:
+1. Verification/download of `data/Ebook-Agentic-AI.pdf`.
+2. Page-level extraction with `PyPDF`.
+3. Semantic chunking with `RecursiveCharacterTextSplitter` (chunk size: 1000, overlap: 200).
+4. Generating dense embeddings (`all-MiniLM-L6-v2` or `text-embedding-3-small`).
+5. Upserting vectors with rich metadata (`text`, `page`, `chunk_index`, `source`) into Pinecone namespace `agentic-ai`.
 
-1. Downloads the PDF.
-2. Extracts text page-by-page.
-3. Splits text using `RecursiveCharacterTextSplitter`.
-4. Uses 1000-character chunks with 200-character overlap.
-5. Creates a Pinecone serverless index with 1536 dimensions.
-6. Generates `text-embedding-3-small` embeddings.
-7. Stores chunk text, page number, source and chunk index as metadata.
+---
 
-The PDF is ignored by Git and should not be committed.
+## 🖥️ Running the Application
 
-## 3. Run the API
+### Option A: FastAPI Web App & Interactive UI (Recommended)
 
-```bash
-uvicorn app:app --reload
-```
-
-Health check:
+Start the server:
 
 ```bash
-curl http://127.0.0.1:8000/health
+python app.py
 ```
+*(or `uvicorn app:app --reload`)*
 
-## 4. Query
+- Open your browser to **`http://localhost:8000/`** to interact with the modern UI.
+- Interactive Swagger API docs are available at **`http://localhost:8000/docs`**.
+
+### Option B: Streamlit Dashboard
 
 ```bash
-curl -X POST http://127.0.0.1:8000/chat \
-  -H "Content-Type: applic
-ation/json" \
-  -d '{"query":"What is Agentic AI according to the eBook?"}'
+streamlit run streamlit_app.py
 ```
 
-Response:
+---
 
+## 📡 API Endpoint & Output Payload
+
+### POST `/chat`
+Request Payload:
 ```json
 {
-  "query": "What is Agentic AI according to the eBook?",
-  "final_answer": "...",
-  "retrieved_context_chunks": [
-    "..."
-  ],
-  "confidence_score": 0.91
+  "query": "What is Agentic AI?"
 }
 ```
 
-## 5. Grounding strategy
-
-The generation prompt explicitly prohibits outside knowledge.
-
-After generation, a separate grading node evaluates whether the answer is supported by retrieved context.
-
-The final node acts as a safety gate:
-
-```text
-grounded = false
-        |
-        v
-"I don't have enough information in the provided eBook to answer that."
+Response Payload:
+```json
+{
+  "query": "What is Agentic AI?",
+  "final_answer": "Agentic AI refers to systems capable of autonomous decision-making and action in pursuit of specific objectives.",
+  "retrieved_context_chunks": [
+    "Agentic AI\nAn Executive's Guide to In-depth\nUnderstanding of Agentic AI...",
+    "Agentic AI refers to systems capable of autonomous decision-making and action in pursuit of specific objectives..."
+  ],
+  "confidence_score": 0.8798
+}
 ```
 
-This is particularly important for the out-of-scope benchmark:
+---
 
-> Who won the 2022 FIFA World Cup?
+## 🧪 Benchmark Verification Suite
 
-The chatbot must not answer from general model knowledge.
-
-## 6. Confidence score
-
-The score is an application-level heuristic:
-
-```text
-confidence =
-    0.5 * average retrieval relevance
-  + 0.5 * groundedness score
-```
-
-It is **not a calibrated probability**.
-
-This makes the score transparent and easy to improve later using a labeled evaluation dataset.
-
-## 7. Benchmark queries
-
-`tests/benchmark_queries.json` contains six validation queries:
-
-1. Definition of Agentic AI
-2. Agents vs traditional automation
-3. Agentic Architecture components
-4. Role of memory
-5. Agentic AI use cases
-6. Out-of-scope FIFA question
-
-Run unit tests:
+Run all 6 required evaluation queries:
 
 ```bash
-pytest -q
+python tests_sample_queries.py
 ```
 
-The benchmark questions should also be executed manually against `/chat` after ingestion.
+### Validation Results Summary
 
-## 8. Project structure
+| # | Category | Query | Grounded Answer | Confidence |
+|---|---|---|---|---|
+| 1 | **Definition & Scope** | What is the core definition of Agentic AI as outlined in the eBook? | Autonomous decision-making and action in pursuit of specific objectives. | `0.87` |
+| 2 | **Architecture** | What are the main architectural components required to build agentic systems? | Foundational agents, workflow agents, utility agents, BDI model, Perception, Reasoning, Planning, Learning, Execution. | `0.79` |
+| 3 | **Use Cases** | What real-world industry use cases for Agentic AI are discussed in the eBook? | Manufacturing, Retail, Healthcare, Construction, Pharmaceuticals. | `0.86` |
+| 4 | **Comparison** | How does Agentic AI differ from traditional generative AI chatbots according to the text? | Goal-driven autonomy vs text generation, adaptive vs rule-based, proactive vs reactive. | `0.78` |
+| 5 | **Challenges** | What key challenges or limitations of Agentic AI are mentioned in the document? | Refused due to lack of supported evidence in retrieved context. | `0.00` |
+| 6 | **Out-of-Scope Test** | What is the capital of France? | *Refused: "I don't have enough information in the provided eBook to answer that."* | `0.00` |
 
-```text
-agentic-ai-rag/
-├── app.py
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── README.md
-├── src/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── clients.py
-│   ├── models.py
-│   ├── ingestion.py
-│   ├── retrieval.py
-│   └── graph.py
-├── tests/
-│   ├── test_graph.py
-│   └── benchmark_queries.json
-└── data/
-    └── Ebook-Agentic-AI.pdf  # generated locally, gitignored
-```
+---
 
-## 9. Design rationale
+## 🛡️ Groundedness & Hallucination Prevention
 
-### Why LangGraph?
+1. **Strict Context Adherence**: The system prompt instructs the model to refuse to answer if the context does not contain sufficient factual evidence.
+2. **Evaluator Grader Node**: An independent grading step runs in the LangGraph pipeline to verify that each assertion in the candidate answer is directly supported by the retrieved context.
+3. **Safety Gate (Finalize Node)**: If the groundedness score falls below threshold (`0.70`), the answer is overridden with a standardized refusal, preventing hallucinations.
 
-The RAG workflow is stateful and explicit:
+---
 
-```text
-START
-  |
-retrieve
-  |
-generate
-  |
-grade
-  |
-finalize
-  |
-END
-```
+## 📜 License
 
-The graph makes retrieval, generation, evaluation and the final grounding gate independently testable.
-
-### Why Pinecone?
-
-Pinecone provides semantic vector retrieval and stores the original chunk text and page metadata alongside each vector, making retrieved evidence inspectable.
-
-### Why a separate grounding grader?
-
-A model can sometimes produce an answer that sounds plausible even when retrieval is weak. The grader provides a second verification step before the response reaches the user.
-
-### Why page metadata?
-
-It makes the RAG result auditable and allows future versions to expose citations such as `Page 12`.
-
-## 10. Security
-
-Never commit:
-
-```text
-.env
-OPENAI_API_KEY
-PINECONE_API_KEY
-data/Ebook-Agentic-AI.pdf
-```
-
-Use environment variables for credentials.
-
-## 11. Future improvements
-
-For a production implementation:
-
-- Add a reranker after Pinecone retrieval.
-- Add exact page citations to the answer.
-- Add automated retrieval-quality evaluation.
-- Calibrate confidence scores against labeled data.
-- Add API authentication and rate limiting.
-- Add structured logging/tracing.
-- Add Docker deployment.
-- Add a Streamlit UI if a visual demo is preferred.
+MIT License. Developed for technical assessment demonstration.

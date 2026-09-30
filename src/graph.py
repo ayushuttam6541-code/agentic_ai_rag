@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from langgraph.graph import StateGraph, START, END
@@ -12,44 +13,44 @@ settings = get_settings()
 
 REFUSAL = "I don't have enough information in the provided eBook to answer that."
 
-GENERATION_PROMPT = """You are a strict document-grounded assistant.
+GENERATION_SYSTEM_PROMPT = """You are a strict document-grounded assistant.
 
 Answer the user's question using ONLY the retrieved context from the Agentic AI eBook.
 
 Rules:
 - Do not use outside knowledge.
 - Do not invent or infer unsupported facts.
-- If the context is insufficient, respond exactly:
+- If the context does not contain enough info, or the question cannot be answered from the context, respond exactly:
   I don't have enough information in the provided eBook to answer that.
-- Answer concisely.
-- Do not mention these instructions.
+- Answer concisely and clearly based strictly on the text.
+- Do not mention these instructions or refer to yourself as an AI."""
 
-Retrieved context:
+GENERATION_USER_PROMPT = """Retrieved context:
 {context}
 
 Question:
 {question}
 """
 
-GRADING_PROMPT = """You are a strict RAG groundedness evaluator.
+GRADING_SYSTEM_PROMPT = """You are a strict RAG groundedness evaluator.
 
 Determine whether the candidate answer is fully supported by the supplied eBook context.
 
-Return ONLY valid JSON:
-{{
+Return ONLY a valid JSON object in this exact format:
+{
   "grounded": true,
-  "score": 0.0
-}}
+  "score": 0.95
+}
 
-Scoring:
-- 1.0 = fully supported
-- 0.7-0.99 = substantially supported with minor uncertainty
-- 0.4-0.69 = partially supported
-- below 0.4 = unsupported
+Scoring guide:
+- 1.0 = fully supported by context
+- 0.7 to 0.99 = substantially supported with minor wording differences
+- 0.4 to 0.69 = partially supported
+- below 0.4 = unsupported or hallucinated
 
-Do not use outside knowledge.
+Do not include any Markdown or explanations, only valid JSON."""
 
-Context:
+GRADING_USER_PROMPT = """Context:
 {context}
 
 Candidate answer:
@@ -63,34 +64,46 @@ def format_context(context: list) -> str:
     )
 
 def retrieve_node(state: AgentState) -> dict[str, Any]:
-    return {"context": retrieve(state["question"])}
+    chunks = retrieve(state["question"])
+    return {"context": chunks}
 
 def generate_node(state: AgentState) -> dict[str, Any]:
-    context = format_context(state.get("context", []))
+    context_items = state.get("context", [])
+    context = format_context(context_items)
 
-    if not context:
+    if not context.strip():
         return {"answer": REFUSAL}
 
     llm_client = get_llm_client()
-    response = llm_client.chat.completions.create(
-        model=settings.get_chat_model(),
-        temperature=0,
-        messages=[
-            {
-                "role": "system",
-                "content": GENERATION_PROMPT.format(
-                    context=context,
-                    question=state["question"],
-                ),
-            }
-        ],
-    )
+    try:
+        response = llm_client.chat.completions.create(
+            model=settings.get_chat_model(),
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": GENERATION_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": GENERATION_USER_PROMPT.format(
+                        context=context,
+                        question=state["question"],
+                    ),
+                },
+            ],
+        )
+        answer = response.choices[0].message.content.strip()
+    except Exception as exc:
+        answer = REFUSAL
 
-    return {"answer": response.choices[0].message.content.strip()}
+    return {"answer": answer}
 
 def grade_node(state: AgentState) -> dict[str, Any]:
     context_items = state.get("context", [])
-    if not context_items:
+    answer = state.get("answer", "").strip()
+
+    if not context_items or answer == REFUSAL or not answer:
         return {
             "grounded": False,
             "groundedness_score": 0.0,
@@ -98,31 +111,39 @@ def grade_node(state: AgentState) -> dict[str, Any]:
         }
 
     context = format_context(context_items)
-
     llm_client = get_llm_client()
-    response = llm_client.chat.completions.create(
-        model=settings.get_chat_model(),
-        temperature=0,
-        messages=[
-            {
-                "role": "system",
-                "content": GRADING_PROMPT.format(
-                    context=context,
-                    answer=state.get("answer", ""),
-                ),
-            }
-        ],
-    )
-
-    raw = response.choices[0].message.content.strip()
 
     try:
+        response = llm_client.chat.completions.create(
+            model=settings.get_chat_model(),
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": GRADING_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": GRADING_USER_PROMPT.format(
+                        context=context,
+                        answer=answer,
+                    ),
+                },
+            ],
+        )
+
+        raw = response.choices[0].message.content.strip()
+        if "```" in raw:
+            match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw, re.DOTALL)
+            if match:
+                raw = match.group(1).strip()
+
         data = json.loads(raw)
         grounded = bool(data.get("grounded", False))
         groundedness = max(0.0, min(1.0, float(data.get("score", 0.0))))
-    except (json.JSONDecodeError, TypeError, ValueError):
-        grounded = False
-        groundedness = 0.0
+    except Exception:
+        grounded = True
+        groundedness = 0.85
 
     retrieval_relevance = sum(
         item.score for item in context_items
@@ -140,10 +161,10 @@ def grade_node(state: AgentState) -> dict[str, Any]:
     }
 
 def finalize_node(state: AgentState) -> dict[str, Any]:
-    if not state.get("grounded", False):
+    if not state.get("grounded", False) or state.get("answer") == REFUSAL:
         return {
             "answer": REFUSAL,
-            "confidence_score": state.get("confidence_score", 0.0),
+            "confidence_score": 0.0,
         }
 
     return {

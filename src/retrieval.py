@@ -1,12 +1,19 @@
-from .clients import get_embedding_model
+from .clients import get_embedding_model, pinecone_client
 from .config import get_settings
-from .ingestion import ensure_index
 from .models import ContextChunk
 
 settings = get_settings()
 
+_index = None
+
+def get_index():
+    global _index
+    if _index is None:
+        _index = pinecone_client.Index(settings.pinecone_index_name)
+    return _index
+
 def retrieve(question: str, top_k: int | None = None) -> list[ContextChunk]:
-    index = ensure_index()
+    index = get_index()
 
     embedding_client = get_embedding_model()
 
