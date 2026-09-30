@@ -2,6 +2,10 @@
 
 An end-to-end, cyclic Retrieval-Augmented Generation (RAG) system built with **LangGraph**, **Pinecone**, and **FastAPI** / **Streamlit**, strictly grounded in the [Agentic AI eBook](https://konverge.ai/pdf/Ebook-Agentic-AI.pdf).
 
+Live demo: https://www.loom.com/share/16a01b0f02004fa1b281acfba7d2fda4
+
+Live url: https://agentic-ai-rag-1-myba.onrender.com/
+
 Developed for the **Appening AI Engineer Interview Task**.
 
 ---
